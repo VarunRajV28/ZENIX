@@ -493,22 +493,20 @@ def show_patient_detail_inline(patient_id: str):
                         st.write(f"Temp: {vitals.get('body_temp', 'N/A')}°C")
                         st.write(f"Blood Sugar: {vitals.get('blood_sugar', 'N/A')} mmol/L")
                         st.write(f"Gestational Weeks: {vitals.get('gestational_weeks', 'N/A')}")
-                        st.write(f"SpO2: {vitals.get('blood_oxygen')}%")
-                        st.write(f"Temp: {vitals.get('body_temperature')}°C")
-                        st.write(f"Blood Sugar: {vitals.get('blood_sugar')} mmol/L")
                     
                     with col2:
                         st.markdown("**Assessment:**")
-                        st.write(f"Risk: {row['risk_level']}")
-                        st.write(f"Confidence: {row['confidence']:.1%}")
-                        st.write(f"Engine: {row.get('engine_source', 'N/A')}")
+                        st.write(f"Risk: {assessment.get('risk_level', 'N/A')}")
+                        st.write(f"Confidence: {assessment.get('confidence', 0):.1%}")
+                        st.write(f"Engine: {assessment.get('engine_source', 'N/A')}")
                         
-                        if row.get('alerts'):
+                        if assessment.get('alerts'):
                             st.markdown("**Alerts:**")
-                            for alert in row['alerts']:
+                            for alert in assessment['alerts']:
                                 st.error(f"⚠️ {alert}")
             
-            # Download option
+            # Create DataFrame for CSV download
+            history_df = pd.DataFrame(history)
             csv = history_df.to_csv(index=False)
             st.download_button(
                 label="📥 Download Patient History (CSV)",
