@@ -117,9 +117,29 @@ class FSMTriageRepository:
         
         cases = await cursor.to_list(length=limit)
         
-        # Convert ObjectId to string
+        # Convert ObjectId to string and add decision_id field for frontend
         for case in cases:
+            case["decision_id"] = str(case["_id"])
             case["_id"] = str(case["_id"])
+            
+            # Ensure ML fields exist with defaults
+            if "final_risk_level" not in case or case["final_risk_level"] is None:
+                case["ml_risk_level"] = "UNKNOWN"
+            else:
+                case["ml_risk_level"] = case["final_risk_level"]
+            
+            if "confidence" not in case or case["confidence"] is None:
+                case["ml_confidence"] = 0.0
+            else:
+                case["ml_confidence"] = case["confidence"]
+            
+            # Add priority score if not present
+            if "ml_priority_score" not in case:
+                case["ml_priority_score"] = 0.0
+            
+            # Add vitals field from input_vitals
+            if "input_vitals" in case:
+                case["vitals"] = case["input_vitals"]
         
         logger.info(f"HITL queue retrieved: {len(cases)} pending cases")
         return cases
@@ -128,7 +148,7 @@ class FSMTriageRepository:
         self,
         case_id: str,
         doctor_id: str,
-        decision: str,
+        final_risk_level: str,
         notes: Optional[str] = None,
         expected_version: int = 1
     ) -> bool:
@@ -138,7 +158,7 @@ class FSMTriageRepository:
         Args:
             case_id: Triage decision ID
             doctor_id: Doctor user ID
-            decision: CONFIRMED, ESCALATED, or DOWNGRADED
+            final_risk_level: Final risk assessment (LOW, MEDIUM, HIGH, CRITICAL)
             notes: Optional review notes
             expected_version: Expected version for optimistic locking
         
@@ -148,7 +168,8 @@ class FSMTriageRepository:
         from bson import ObjectId
         
         update_data = {
-            "review_status": decision,
+            "review_status": ReviewStatus.RESOLVED,
+            "final_risk_level": final_risk_level,
             "reviewed_by": doctor_id,
             "reviewed_at": datetime.utcnow(),
             "review_notes": notes,
@@ -165,7 +186,7 @@ class FSMTriageRepository:
         )
         
         if result.modified_count > 0:
-            logger.info(f"HITL case resolved: {case_id} by {doctor_id}")
+            logger.info(f"HITL case resolved: {case_id} by {doctor_id} -> {final_risk_level}")
             return True
         else:
             logger.warning(f"HITL resolution failed (version conflict): {case_id}")

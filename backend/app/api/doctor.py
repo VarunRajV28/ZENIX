@@ -203,10 +203,10 @@ async def get_patient_details(
 
 class HITLResolveRequest(BaseModel):
     """Request to resolve HITL case."""
-    case_id: str
-    decision: str  # CONFIRMED, ESCALATED, DOWNGRADED
-    notes: Optional[str] = None
-    expected_version: int = 1
+    decision_id: str
+    final_risk_level: str  # LOW, MEDIUM, HIGH, CRITICAL
+    doctor_notes: Optional[str] = None
+    version_id: int = 1
 
 
 @router.get("/hitl-queue")
@@ -251,28 +251,28 @@ async def resolve_hitl_case(
     when multiple doctors access the same case.
     
     Args:
-        request: Resolution details (case_id, decision, notes)
+        request: Resolution details (decision_id, final_risk_level, doctor_notes, version_id)
     
     Returns:
         Success status or version conflict error
     """
     fsm_repo = FSMTriageRepository(database)
     
-    # Validate decision
-    valid_decisions = ["CONFIRMED", "ESCALATED", "DOWNGRADED", "RESOLVED"]
-    if request.decision not in valid_decisions:
+    # Validate risk level
+    valid_risk_levels = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    if request.final_risk_level not in valid_risk_levels:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid decision. Must be one of: {valid_decisions}"
+            detail=f"Invalid risk level. Must be one of: {valid_risk_levels}"
         )
     
     # Attempt to resolve with optimistic locking
     success = await fsm_repo.resolve_hitl_case(
-        case_id=request.case_id,
+        case_id=request.decision_id,
         doctor_id=current_user["_id"],
-        decision=request.decision,
-        notes=request.notes,
-        expected_version=request.expected_version
+        final_risk_level=request.final_risk_level,
+        notes=request.doctor_notes,
+        expected_version=request.version_id
     )
     
     if not success:
@@ -282,13 +282,13 @@ async def resolve_hitl_case(
         )
     
     logger.info(
-        f"HITL case resolved: {request.case_id} by {current_user['_id']} "
-        f"(decision: {request.decision})"
+        f"HITL case resolved: {request.decision_id} by {current_user['_id']} "
+        f"(risk level: {request.final_risk_level})"
     )
     
     return {
         "success": True,
-        "message": f"Case {request.case_id} resolved as {request.decision}",
+        "message": f"Case {request.decision_id} resolved as {request.final_risk_level}",
         "resolved_by": current_user["_id"],
-        "decision": request.decision
+        "final_risk_level": request.final_risk_level
     }

@@ -221,7 +221,7 @@ class TriageStateMachine:
         """
         try:
             # Call ML through circuit breaker
-            ml_result = self.circuit_breaker.call(
+            ml_result = await self.circuit_breaker.call(
                 self.ml_model.predict,
                 context.validated_vitals
             )

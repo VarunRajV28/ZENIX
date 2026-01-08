@@ -134,10 +134,7 @@ async def submit_triage(
         # Initialize FSM orchestrator
         rules_engine = ClinicalRulesEngine()
         ml_model = MaternalHealthPredictor()
-        circuit_breaker = CircuitBreaker(
-            failure_threshold=getattr(settings, 'circuit_breaker_threshold', 5),
-            timeout_seconds=getattr(settings, 'circuit_breaker_timeout', 60)
-        )
+        circuit_breaker = CircuitBreaker()  # Uses settings internally
         
         fsm = TriageStateMachine(
             rules_engine=rules_engine,

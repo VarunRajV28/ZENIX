@@ -120,7 +120,7 @@ def show_hitl_case(case: dict, case_number: int):
             show_fsm_trace_section(fsm_trace)
         
         with tab3:
-            show_actions_section(decision_id, patient_name, ml_risk_level, ml_confidence, version_id)
+            show_actions_section(decision_id, patient_name, ml_risk_level, ml_confidence, version_id, case_number)
 
 
 def show_vitals_section(vitals: dict):
@@ -130,34 +130,75 @@ def show_vitals_section(vitals: dict):
         st.warning("⚠️ No vitals data available")
         return
     
-    # Vital signs
+    # Helper function to check if value is valid
+    def is_valid(value):
+        return value and value != 'N/A' and value != '' and str(value).strip() != ''
+    
+    # Vital signs - organize into available metrics
     st.markdown("#### 🩺 Vital Signs")
-    col1, col2, col3 = st.columns(3)
     
-    with col1:
-        st.metric("Systolic BP", f"{vitals.get('systolic_bp', 'N/A')} mmHg")
-        st.metric("Heart Rate", f"{vitals.get('heart_rate', 'N/A')} bpm")
+    vital_metrics = []
     
-    with col2:
-        st.metric("Diastolic BP", f"{vitals.get('diastolic_bp', 'N/A')} mmHg")
-        st.metric("Temperature", f"{vitals.get('temperature', 'N/A')} °F")
+    # Blood Pressure (always show together if available)
+    systolic = vitals.get('systolic_bp')
+    diastolic = vitals.get('diastolic_bp')
+    if is_valid(systolic) and is_valid(diastolic):
+        vital_metrics.append(("Blood Pressure", f"{systolic}/{diastolic} mmHg"))
+    elif is_valid(systolic):
+        vital_metrics.append(("Systolic BP", f"{systolic} mmHg"))
+    elif is_valid(diastolic):
+        vital_metrics.append(("Diastolic BP", f"{diastolic} mmHg"))
     
-    with col3:
-        st.metric("Blood Glucose", f"{vitals.get('blood_glucose', 'N/A')} mg/dL")
-        st.metric("Gestational Age", f"{vitals.get('gestational_age', 'N/A')} weeks")
+    # Other vitals
+    if is_valid(vitals.get('heart_rate')):
+        vital_metrics.append(("Heart Rate", f"{vitals.get('heart_rate')} bpm"))
+    if is_valid(vitals.get('temperature')):
+        vital_metrics.append(("Temperature", f"{vitals.get('temperature')} °F"))
+    if is_valid(vitals.get('blood_glucose')):
+        vital_metrics.append(("Blood Glucose", f"{vitals.get('blood_glucose')} mg/dL"))
+    if is_valid(vitals.get('gestational_age')):
+        vital_metrics.append(("Gestational Age", f"{vitals.get('gestational_age')} weeks"))
     
-    # Clinical indicators
-    st.markdown("#### 🔬 Clinical Indicators")
-    col1, col2 = st.columns(2)
+    # Display metrics in columns
+    if vital_metrics:
+        num_cols = min(3, len(vital_metrics))
+        cols = st.columns(num_cols)
+        
+        for idx, (label, value) in enumerate(vital_metrics):
+            with cols[idx % num_cols]:
+                st.metric(label, value)
+    else:
+        st.info("No vital signs data available")
     
-    with col1:
-        st.markdown(f"**Proteinuria:** {vitals.get('proteinuria', 'N/A')}")
-        st.markdown(f"**Edema:** {vitals.get('edema', 'N/A')}")
-        st.markdown(f"**Previous Complications:** {vitals.get('previous_complications', 'N/A')}")
+    # Clinical indicators - only show if not N/A
+    clinical_indicators = {
+        "Proteinuria": vitals.get('proteinuria'),
+        "Edema": vitals.get('edema'),
+        "Previous Complications": vitals.get('previous_complications'),
+        "Vaginal Bleeding": vitals.get('vaginal_bleeding'),
+        "Fetal Movement": vitals.get('fetal_movement')
+    }
     
-    with col2:
-        st.markdown(f"**Vaginal Bleeding:** {vitals.get('vaginal_bleeding', 'N/A')}")
-        st.markdown(f"**Fetal Movement:** {vitals.get('fetal_movement', 'N/A')}")
+    # Filter out N/A values
+    available_indicators = {
+        key: value for key, value in clinical_indicators.items() 
+        if value and value != 'N/A' and value != ''
+    }
+    
+    if available_indicators:
+        st.markdown("#### 🔬 Clinical Indicators")
+        col1, col2 = st.columns(2)
+        
+        items = list(available_indicators.items())
+        mid_point = (len(items) + 1) // 2
+        
+        with col1:
+            for key, value in items[:mid_point]:
+                st.markdown(f"**{key}:** {value}")
+        
+        with col2:
+            for key, value in items[mid_point:]:
+                st.markdown(f"**{key}:** {value}")
     
     # Symptoms
     symptoms = vitals.get('symptoms', '')
@@ -203,28 +244,28 @@ def show_fsm_trace_section(fsm_trace: list):
             st.success(f"✅ Terminal State: **{terminal_state}** - Requires human review")
 
 
-def show_actions_section(decision_id: str, patient_name: str, ml_risk_level: str, ml_confidence: float, version_id: int):
+def show_actions_section(decision_id: str, patient_name: str, ml_risk_level: str, ml_confidence: float, version_id: int, case_number: int = 0):
     """Display action buttons for HITL resolution"""
     
     st.markdown("#### 🎯 Review Decision")
     st.markdown("Select your clinical judgment on this case:")
     
-    # Action buttons
+    # Action buttons - use case_number to ensure unique keys
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("✅ Confirm ML Assessment", key=f"confirm_{decision_id}", use_container_width=True):
+        if st.button("✅ Confirm ML Assessment", key=f"confirm_{case_number}_{decision_id}", use_container_width=True):
             resolve_hitl_case(decision_id, "CONFIRMED", ml_risk_level, patient_name, version_id, 
                             f"Doctor confirmed ML assessment: {ml_risk_level} (confidence: {ml_confidence:.1%})")
     
     with col2:
-        if st.button("⬆️ Escalate to Higher Risk", key=f"escalate_{decision_id}", use_container_width=True):
+        if st.button("⬆️ Escalate to Higher Risk", key=f"escalate_{case_number}_{decision_id}", use_container_width=True):
             escalated_risk = escalate_risk_level(ml_risk_level)
             resolve_hitl_case(decision_id, "ESCALATED", escalated_risk, patient_name, version_id,
                             f"Doctor escalated from {ml_risk_level} to {escalated_risk}")
     
     with col3:
-        if st.button("⬇️ Downgrade to Lower Risk", key=f"downgrade_{decision_id}", use_container_width=True):
+        if st.button("⬇️ Downgrade to Lower Risk", key=f"downgrade_{case_number}_{decision_id}", use_container_width=True):
             downgraded_risk = downgrade_risk_level(ml_risk_level)
             resolve_hitl_case(decision_id, "DOWNGRADED", downgraded_risk, patient_name, version_id,
                             f"Doctor downgraded from {ml_risk_level} to {downgraded_risk}")
