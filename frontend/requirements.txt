@@ -1,0 +1,15 @@
+# ===================================================================
+# MomWatch AI - Frontend Dependencies
+# ===================================================================
+# Streamlit Framework
+streamlit==1.30.0
+
+# HTTP Client
+requests==2.31.0
+
+# Data Visualization
+plotly==5.18.0
+pandas==2.2.0
+
+# Utilities
+python-dateutil==2.8.2

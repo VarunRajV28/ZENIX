@@ -1,0 +1,127 @@
+"""
+Configuration Module - Type-Safe Environment Variable Management
+================================================================
+Uses Pydantic BaseSettings for validated environment variable loading.
+All production-critical settings MUST be explicitly defined in .env file.
+
+Security Notes:
+- JWT_SECRET must be minimum 32 characters
+- MongoDB URI format is validated
+- CORS origins are restricted to prevent XSS
+"""
+
+import re
+from typing import List
+from pydantic import field_validator, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """
+    Application settings with validation and type safety.
+    Reads from environment variables with .env file support.
+    """
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore"
+    )
+    
+    # MongoDB Configuration
+    MONGO_URI: str = Field(default="mongodb://localhost:27017")
+    MONGO_DB_NAME: str = Field(default="momwatch_db")
+    MONGO_MAX_POOL_SIZE: int = Field(default=50, ge=1, le=100)
+    MONGO_MIN_POOL_SIZE: int = Field(default=10, ge=1, le=50)
+    
+    # Security & JWT
+    JWT_SECRET: str = Field(..., min_length=32)
+    JWT_ALGORITHM: str = Field(default="HS256")
+    JWT_EXPIRATION_MINUTES: int = Field(default=1440, ge=1)
+    
+    # API Server
+    API_HOST: str = Field(default="0.0.0.0")
+    API_PORT: int = Field(default=8000, ge=1024, le=65535)
+    API_WORKERS: int = Field(default=4, ge=1, le=16)
+    CORS_ORIGINS: List[str] = Field(default=["http://localhost:8501"])
+    
+    # Zudu AI Integration
+    ZUDU_API_KEY: str = Field(default="")
+    ZUDU_API_ENDPOINT: str = Field(default="https://api.zudu.ai/v1/health-analysis")
+    ZUDU_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
+    ZUDU_MAX_RETRIES: int = Field(default=3, ge=0, le=10)
+    
+    # ML Model Configuration
+    MODEL_PATH: str = Field(default="/app/models/maternal_rf_model.joblib")
+    SCALER_PATH: str = Field(default="/app/models/feature_scaler.joblib")
+    LABEL_ENCODER_PATH: str = Field(default="/app/models/label_encoder.joblib")
+    MODEL_CONFIDENCE_THRESHOLD: float = Field(default=0.75, ge=0.0, le=1.0)
+    
+    # Circuit Breaker Settings
+    CIRCUIT_FAILURE_THRESHOLD: int = Field(default=5, ge=1, le=20)
+    CIRCUIT_TIMEOUT_SECONDS: int = Field(default=60, ge=10, le=600)
+    CIRCUIT_HALF_OPEN_ATTEMPTS: int = Field(default=3, ge=1, le=10)
+    
+    # Idempotency
+    IDEMPOTENCY_TTL_MINUTES: int = Field(default=10, ge=1, le=60)
+    
+    # Logging
+    LOG_LEVEL: str = Field(default="INFO")
+    LOG_FILE_PATH: str = Field(default="/app/logs/momwatch.log")
+    
+    @field_validator("MONGO_URI")
+    @classmethod
+    def validate_mongo_uri(cls, v: str) -> str:
+        """Validate MongoDB URI format."""
+        pattern = r'^mongodb(\+srv)?:\/\/.+'
+        if not re.match(pattern, v):
+            raise ValueError(
+                f"Invalid MongoDB URI format: {v}. "
+                "Must start with 'mongodb://' or 'mongodb+srv://'"
+            )
+        return v
+    
+    @field_validator("JWT_SECRET")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        """Ensure JWT secret meets security requirements."""
+        if len(v) < 32:
+            raise ValueError(
+                f"JWT_SECRET must be at least 32 characters. Current length: {len(v)}. "
+                "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+        return v
+    
+    @field_validator("LOG_LEVEL")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Validate log level is a recognized value."""
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        v_upper = v.upper()
+        if v_upper not in valid_levels:
+            raise ValueError(
+                f"Invalid LOG_LEVEL: {v}. Must be one of {valid_levels}"
+            )
+        return v_upper
+    
+    @property
+    def idempotency_ttl_seconds(self) -> int:
+        """Convert idempotency TTL to seconds for MongoDB."""
+        return self.IDEMPOTENCY_TTL_MINUTES * 60
+    
+    @property
+    def jwt_expiration_seconds(self) -> int:
+        """Convert JWT expiration to seconds."""
+        return self.JWT_EXPIRATION_MINUTES * 60
+
+
+# Global settings instance
+# This will be imported throughout the application
+try:
+    settings = Settings()
+except Exception as e:
+    raise RuntimeError(
+        f"FATAL: Configuration validation failed: {str(e)}. "
+        "Please check your .env file and ensure all required variables are set correctly."
+    ) from e
