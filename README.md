@@ -588,10 +588,6 @@ Content-Type: application/json
   "body_temp": 37.1,
   "heart_rate": 85,
   "spo2": 97.0,
-  "proteinuria": 1,  // 0=none, 1=trace, 2=+1, 3=+2, 4=+3
-  "edema": 1,         // 0=none, 1=mild, 2=moderate, 3=severe
-  "reduced_fetal_movement": false,
-  "symptoms": "Mild headache, slight swelling in ankles"
 }
 ```
 
