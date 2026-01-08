@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: momwatch_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+
+  backend:
+    image: rohith714/momwatch-backend:latest
+    container_name: momwatch_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - JWT_SECRET=this_is_a_demo_jwt_secret_key_32_chars
+      - MONGO_URI=mongodb://mongodb:27017/momwatch_db
+    depends_on:
+      - mongodb
+
+  frontend:
+    image: rohith714/momwatch-frontend:latest
+    container_name: momwatch_frontend
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_API_URL=http://backend:8000
+    depends_on:
+      - backend
