@@ -7,14 +7,18 @@ Endpoints:
 - GET /dashboard/emergency: Critical patients in last 24 hours
 - GET /patients/priority: Priority-sorted patient list
 - GET /patients/{patient_id}/details: Patient history and details
+- GET /hitl-queue: Pending HITL cases for review
+- POST /hitl-resolve: Resolve HITL case
 """
 
 from datetime import datetime, timedelta
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional
+from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.responses import EmergencyAlert, PriorityPatient, DashboardData, HistoryEntry
 from app.db.repositories import TriageRepository, UserRepository
+from app.db.fsm_repository import FSMTriageRepository
 from app.utils.dependencies import get_database, get_current_doctor
 from app.utils.logger import logger
 
@@ -190,4 +194,101 @@ async def get_patient_details(
             "pre_existing_conditions": patient.get("pre_existing_conditions", [])
         },
         "history": history_entries
+    }
+
+
+# ============================================================================
+# HITL (Human-in-the-Loop) Endpoints
+# ============================================================================
+
+class HITLResolveRequest(BaseModel):
+    """Request to resolve HITL case."""
+    case_id: str
+    decision: str  # CONFIRMED, ESCALATED, DOWNGRADED
+    notes: Optional[str] = None
+    expected_version: int = 1
+
+
+@router.get("/hitl-queue")
+async def get_hitl_queue(
+    limit: int = 50,
+    current_user: dict = Depends(get_current_doctor),
+    database: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """
+    Get pending HITL cases requiring doctor review.
+    
+    Returns cases with low ML confidence that need human assessment.
+    
+    Args:
+        limit: Maximum number of cases (default 50)
+    
+    Returns:
+        List of pending HITL cases with FSM trace
+    """
+    fsm_repo = FSMTriageRepository(database)
+    
+    cases = await fsm_repo.get_hitl_queue(limit=limit)
+    
+    logger.info(
+        f"HITL queue accessed by doctor: {current_user['_id']} "
+        f"({len(cases)} pending cases)"
+    )
+    
+    return cases
+
+
+@router.post("/hitl-resolve")
+async def resolve_hitl_case(
+    request: HITLResolveRequest,
+    current_user: dict = Depends(get_current_doctor),
+    database: AsyncIOMotorDatabase = Depends(get_database)
+):
+    """
+    Resolve a HITL case with doctor's decision.
+    
+    Uses optimistic locking (version_id) to prevent race conditions
+    when multiple doctors access the same case.
+    
+    Args:
+        request: Resolution details (case_id, decision, notes)
+    
+    Returns:
+        Success status or version conflict error
+    """
+    fsm_repo = FSMTriageRepository(database)
+    
+    # Validate decision
+    valid_decisions = ["CONFIRMED", "ESCALATED", "DOWNGRADED", "RESOLVED"]
+    if request.decision not in valid_decisions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid decision. Must be one of: {valid_decisions}"
+        )
+    
+    # Attempt to resolve with optimistic locking
+    success = await fsm_repo.resolve_hitl_case(
+        case_id=request.case_id,
+        doctor_id=current_user["_id"],
+        decision=request.decision,
+        notes=request.notes,
+        expected_version=request.expected_version
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Version conflict - case was updated by another doctor. Please refresh."
+        )
+    
+    logger.info(
+        f"HITL case resolved: {request.case_id} by {current_user['_id']} "
+        f"(decision: {request.decision})"
+    )
+    
+    return {
+        "success": True,
+        "message": f"Case {request.case_id} resolved as {request.decision}",
+        "resolved_by": current_user["_id"],
+        "decision": request.decision
     }

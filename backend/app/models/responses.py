@@ -28,9 +28,13 @@ class TriageResponse(BaseModel):
     feature_importances: Dict[str, float]
     engine_source: str
     fallback_active: bool
-    zudu_insights: Optional[Dict[str, Any]] = None
+
     timestamp: datetime
     processing_time_ms: int
+    
+    # FSM additions
+    fsm_trace: Optional[Dict[str, Any]] = None
+    requires_hitl: bool = False
     
     class Config:
         json_schema_extra = {
@@ -49,7 +53,12 @@ class TriageResponse(BaseModel):
                 },
                 "engine_source": "HYBRID",
                 "fallback_active": False,
-                "processing_time_ms": 234
+                "processing_time_ms": 234,
+                "fsm_trace": {
+                    "final_state": "DONE",
+                    "total_transitions": 6
+                },
+                "requires_hitl": False
             }
         }
 
@@ -173,7 +182,7 @@ class SystemHealth(BaseModel):
     database_connected: bool
     ml_model_loaded: bool
     circuit_breaker_state: str
-    zudu_ai_available: bool
+
     timestamp: datetime
     
     class Config:

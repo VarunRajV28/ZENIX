@@ -46,12 +46,6 @@ class Settings(BaseSettings):
     API_WORKERS: int = Field(default=4, ge=1, le=16)
     CORS_ORIGINS: List[str] = Field(default=["http://localhost:8501"])
     
-    # Zudu AI Integration
-    ZUDU_API_KEY: str = Field(default="")
-    ZUDU_API_ENDPOINT: str = Field(default="https://api.zudu.ai/v1/health-analysis")
-    ZUDU_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=60)
-    ZUDU_MAX_RETRIES: int = Field(default=3, ge=0, le=10)
-    
     # ML Model Configuration
     MODEL_PATH: str = Field(default="/app/models/maternal_rf_model.joblib")
     SCALER_PATH: str = Field(default="/app/models/feature_scaler.joblib")
@@ -65,6 +59,12 @@ class Settings(BaseSettings):
     
     # Idempotency
     IDEMPOTENCY_TTL_MINUTES: int = Field(default=10, ge=1, le=60)
+    
+    # FSM & HITL Configuration (Build2Break additions)
+    HONEYPOT_ENABLED: bool = Field(default=True)
+    HONEYPOT_LOG_TO_DB: bool = Field(default=True)
+    HITL_CONFIDENCE_THRESHOLD: float = Field(default=0.65, ge=0.0, le=1.0)
+    FSM_STATE_TIMEOUT_SECONDS: int = Field(default=30, ge=5, le=120)
     
     # Logging
     LOG_LEVEL: str = Field(default="INFO")
@@ -114,6 +114,11 @@ class Settings(BaseSettings):
     def jwt_expiration_seconds(self) -> int:
         """Convert JWT expiration to seconds."""
         return self.JWT_EXPIRATION_MINUTES * 60
+    
+    @property
+    def hitl_confidence_threshold(self) -> float:
+        """HITL trigger threshold (lowercase for backward compatibility)."""
+        return self.HITL_CONFIDENCE_THRESHOLD
 
 
 # Global settings instance

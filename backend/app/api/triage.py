@@ -1,25 +1,35 @@
 """
-Triage API Endpoint - Main Health Assessment
-=============================================
-POST /triage: Idempotent, circuit-broken maternal health assessment
+Triage API Endpoint - FSM-based Health Assessment
+=================================================
+POST /triage: Idempotent, FSM-orchestrated maternal health assessment
 
 Features:
-- Idempotency key support (x-idempotency-key header)
+- Finite State Machine architecture for deterministic flow
+- Honeypot detection (handled by middleware)
+- Idempotency with client_sync_uuid
+- Human-in-the-Loop integration for low confidence cases
+- Complete FSM trace for debugging
 - Circuit breaker protection for ML model
-- Comprehensive risk assessment through 3-layer pipeline
-- Audit trail logging
 """
 
 import hashlib
 import json
+import uuid
 from typing import Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Header, Response
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.requests import TriageRequest
 from app.models.responses import TriageResponse
 from app.db.repositories import TriageRepository, IdempotencyRepository
+from app.db.fsm_repository import FSMTriageRepository
 from app.db.schemas import TriageLogDocument, IdempotencyKeyDocument, RiskLevel
 from app.engine.orchestrator import assess_maternal_risk
+from app.engine.fsm_orchestrator import TriageStateMachine, FSMContext, FSMState
+from app.engine.rules import ClinicalRulesEngine
+from app.engine.ml_model import MaternalHealthPredictor
+from app.engine.circuit import CircuitBreaker
+from app.config import settings
 from app.utils.dependencies import get_database, get_current_user, get_idempotency_key
 from app.utils.logger import logger
 
@@ -36,10 +46,15 @@ async def submit_triage(
     database: AsyncIOMotorDatabase = Depends(get_database)
 ):
     """
-    Submit maternal health triage assessment.
+    Submit maternal health triage assessment using FSM architecture.
     
-    This endpoint is idempotent - duplicate requests with the same idempotency
-    key within 10 minutes will return the cached response.
+    This endpoint uses a Finite State Machine for deterministic processing:
+    INGEST → SANITY → RULE_ENGINE → ML_INFERENCE → CONFIDENCE_CHECK → SAVE_DB
+    
+    Terminal states:
+    - DONE: Successfully assessed
+    - REJECT: Validation/honeypot failure
+    - HITL_HANDOFF: Low confidence, requires doctor review
     
     Args:
         request: Triage request with clinical vitals
@@ -48,7 +63,7 @@ async def submit_triage(
         database: Database connection
     
     Returns:
-        Comprehensive risk assessment
+        Comprehensive risk assessment with FSM trace
     
     Headers:
         x-idempotency-key: UUID for request deduplication (optional)
@@ -56,119 +71,198 @@ async def submit_triage(
     """
     user_id = current_user["_id"]
     
+    # Generate client_sync_uuid if not provided
+    client_sync_uuid = idempotency_key or str(uuid.uuid4())
+    
     logger.info(
         f"Triage request received for user: {user_id}",
-        extra={"idempotency_key": idempotency_key}
+        extra={"client_sync_uuid": client_sync_uuid}
     )
     
     # =========================================================================
-    # IDEMPOTENCY CHECK
+    # IDEMPOTENCY CHECK (FSM-based)
     # =========================================================================
-    idempotency_repo = IdempotencyRepository(database)
+    fsm_repo = FSMTriageRepository(database)
     
-    if idempotency_key:
-        # Check for cached response
-        cached_response = await idempotency_repo.get_cached_response(idempotency_key)
+    cached_decision = await fsm_repo.check_idempotency(
+        client_sync_uuid=client_sync_uuid,
+        ttl_minutes=10
+    )
+    
+    if cached_decision:
+        logger.info(
+            f"Idempotency cache HIT: {client_sync_uuid}",
+            extra={"user_id": user_id}
+        )
+        response.headers["X-Idempotent-Replay"] = "true"
         
-        if cached_response:
-            logger.info(
-                f"Idempotency cache HIT: {idempotency_key}",
-                extra={"user_id": user_id}
-            )
-            # Set header to indicate this is a replayed response
-            response.headers["X-Idempotent-Replay"] = "true"
-            return TriageResponse(**cached_response)
+        # Return cached response
+        return TriageResponse(
+            assessment_id=str(cached_decision["_id"]),
+            risk_level=cached_decision["final_risk_level"],
+            confidence=cached_decision["confidence"],
+            alerts=cached_decision["alerts"],
+            clinical_notes=cached_decision.get("clinical_notes", []),
+            feature_importances={},
+            engine_source=cached_decision["engine_source"],
+            fallback_active=False,
+            timestamp=cached_decision["created_at"],
+            processing_time_ms=int(cached_decision["processing_time_ms"]),
+            fsm_trace=cached_decision.get("fsm_trace", []),
+            requires_hitl=cached_decision.get("requires_hitl", False)
+        )
     
     # =========================================================================
-    # RISK ASSESSMENT PIPELINE
+    # FSM EXECUTION
     # =========================================================================
     try:
-        # Run comprehensive assessment
-        assessment = await assess_maternal_risk(request.vitals)
+        start_time = datetime.utcnow()
         
-        # Store in triage logs
-        triage_repo = TriageRepository(database)
-        
-        # Extract patient name from symptoms field if present
+        # Extract patient name from symptoms field
         patient_name = None
-        logger.info(f"DEBUG - Symptoms received: {request.vitals.symptoms}")
         if request.vitals.symptoms and 'Patient:' in request.vitals.symptoms:
             patient_name = request.vitals.symptoms.split('|')[0].replace('Patient:', '').strip()
-            logger.info(f"DEBUG - Extracted patient name: {patient_name}")
-        else:
-            logger.warning(f"DEBUG - No patient name found. Symptoms: {request.vitals.symptoms}")
+            logger.info(f"Extracted patient name: {patient_name}")
         
-        triage_log = TriageLogDocument(
+        # Initialize FSM context
+        context = FSMContext(
+            raw_vitals=request.vitals.model_dump(),
             user_id=user_id,
-            patient_name=patient_name,
-            age=request.vitals.age,
-            systolic_bp=request.vitals.systolic_bp,
-            diastolic_bp=request.vitals.diastolic_bp,
-            blood_sugar=request.vitals.blood_sugar,
-            body_temp=request.vitals.body_temp,
-            heart_rate=request.vitals.heart_rate,
-            blood_oxygen=request.vitals.blood_oxygen,
-            gestational_weeks=request.vitals.gestational_weeks,
-            risk_level=RiskLevel(assessment["risk_level"]),
-            confidence=assessment["confidence"],
-            alerts=assessment["alerts"],
-            clinical_notes=assessment["clinical_notes"],
-            feature_importances=assessment.get("feature_importances"),
-            engine_source=assessment["engine_source"],
-            fallback_active=assessment["fallback_active"],
-            zudu_insights=assessment.get("zudu_insights"),
-            processing_time_ms=assessment["processing_time_ms"],
-            timestamp=assessment["timestamp"]
+            client_sync_uuid=client_sync_uuid
         )
         
-        log_id = await triage_repo.create_triage_log(triage_log)
-        
-        # Build response
-        triage_response = TriageResponse(
-            assessment_id=log_id,
-            risk_level=assessment["risk_level"].value if hasattr(assessment["risk_level"], "value") else assessment["risk_level"],
-            confidence=assessment["confidence"],
-            alerts=assessment["alerts"],
-            clinical_notes=assessment["clinical_notes"],
-            feature_importances=assessment.get("feature_importances", {}),
-            engine_source=assessment["engine_source"],
-            fallback_active=assessment["fallback_active"],
-            zudu_insights=assessment.get("zudu_insights"),
-            timestamp=assessment["timestamp"],
-            processing_time_ms=assessment["processing_time_ms"]
+        # Initialize FSM orchestrator
+        rules_engine = ClinicalRulesEngine()
+        ml_model = MaternalHealthPredictor()
+        circuit_breaker = CircuitBreaker(
+            failure_threshold=getattr(settings, 'circuit_breaker_threshold', 5),
+            timeout_seconds=getattr(settings, 'circuit_breaker_timeout', 60)
         )
         
+        fsm = TriageStateMachine(
+            rules_engine=rules_engine,
+            ml_model=ml_model,
+            circuit_breaker=circuit_breaker
+        )
+        
+        # Execute FSM
+        context = await fsm.execute(context)
+        
+        processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        
         # =====================================================================
-        # STORE IDEMPOTENCY KEY
+        # HANDLE TERMINAL STATES
         # =====================================================================
-        if idempotency_key:
-            # Create request hash for verification
-            request_hash = hashlib.sha256(
-                json.dumps(request.vitals.model_dump(), sort_keys=True).encode()
-            ).hexdigest()
+        
+        if context.current_state == FSMState.REJECT:
+            # Validation or honeypot failure
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=context.error_message or "Request rejected by validation"
+            )
+        
+        elif context.current_state == FSMState.HITL_HANDOFF:
+            # Low confidence - requires human review
+            decision_data = {
+                "client_sync_uuid": client_sync_uuid,
+                "user_id": user_id,
+                "patient_uuid": patient_name,  # Use patient_name as UUID for now
+                "patient_name": patient_name,
+                "input_vitals": context.raw_vitals,
+                "fsm_state": context.current_state,
+                "final_risk_level": context.final_risk_level,
+                "confidence": context.confidence,
+                "alerts": context.alerts,
+                "clinical_notes": ["Low confidence - requires HITL review"],
+                "fsm_trace": [t.model_dump() for t in context.fsm_trace],
+                "is_honeypot_triggered": context.is_honeypot_triggered,
+                "bypassed_ml": context.bypass_ml,
+                "requires_hitl": True,
+                "review_status": "PENDING",
+                "version_id": 1,
+                "engine_source": "FSM_HITL",
+                "processing_time_ms": processing_time,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
             
-            idempotency_doc = IdempotencyKeyDocument(
-                idempotency_key=idempotency_key,
-                user_id=user_id,
-                request_hash=request_hash,
-                response_data=triage_response.model_dump()
+            decision_id = await fsm_repo.save_triage_decision(decision_data)
+            
+            logger.info(f"HITL case created: {decision_id}")
+            
+            return TriageResponse(
+                assessment_id=decision_id,
+                risk_level=context.final_risk_level or "MEDIUM",
+                confidence=context.confidence or 0.5,
+                alerts=context.alerts + ["⏳ Pending doctor review"],
+                clinical_notes=["Low confidence assessment - awaiting HITL review"],
+                feature_importances={},
+                engine_source="FSM_HITL",
+                fallback_active=False,
+                timestamp=datetime.utcnow(),
+                processing_time_ms=int(processing_time),
+                fsm_trace=fsm.get_trace_summary(context),
+                requires_hitl=True
+            )
+        
+        elif context.current_state == FSMState.DONE:
+            # Success - save decision
+            decision_data = {
+                "client_sync_uuid": client_sync_uuid,
+                "user_id": user_id,
+                "patient_uuid": patient_name,
+                "patient_name": patient_name,
+                "input_vitals": context.raw_vitals,
+                "fsm_state": context.current_state,
+                "final_risk_level": context.final_risk_level,
+                "confidence": context.confidence,
+                "alerts": context.alerts,
+                "clinical_notes": [],
+                "fsm_trace": [t.model_dump() for t in context.fsm_trace],
+                "is_honeypot_triggered": context.is_honeypot_triggered,
+                "bypassed_ml": context.bypass_ml,
+                "requires_hitl": False,
+                "review_status": "PENDING",
+                "version_id": 1,
+                "engine_source": "FSM",
+                "processing_time_ms": processing_time,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            
+            decision_id = await fsm_repo.save_triage_decision(decision_data)
+            
+            logger.info(
+                f"Triage assessment completed: {context.final_risk_level}",
+                extra={"user_id": user_id, "decision_id": decision_id}
             )
             
-            await idempotency_repo.store_response(idempotency_doc)
+            return TriageResponse(
+                assessment_id=decision_id,
+                risk_level=context.final_risk_level,
+                confidence=context.confidence,
+                alerts=context.alerts,
+                clinical_notes=[],
+                feature_importances=context.ml_result.get("feature_importances", {}) if context.ml_result else {},
+                engine_source="FSM",
+                fallback_active=False,
+                timestamp=datetime.utcnow(),
+                processing_time_ms=int(processing_time),
+                fsm_trace=fsm.get_trace_summary(context),
+                requires_hitl=False
+            )
         
-        logger.info(
-            f"Triage assessment completed: {triage_response.risk_level}",
-            extra={
-                "user_id": user_id,
-                "log_id": log_id,
-                "engine": assessment["engine_source"]
-            }
-        )
-        
-        return triage_response
+        else:
+            # Unexpected state
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Unexpected FSM state: {context.current_state}"
+            )
+    
+    except HTTPException:
+        raise
     
     except ValueError as e:
-        # Pydantic validation error or adversarial input
         logger.warning(f"Validation error in triage: {str(e)}", extra={"user_id": user_id})
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

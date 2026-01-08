@@ -1,10 +1,10 @@
 """
 Admin API Endpoints
 ===================
-System health monitoring and metrics endpoints.
+System health monitoring and metrics endpoints with FSM statistics.
 
 Endpoints:
-- GET /system/health: System health check
+- GET /system/health: System health check with FSM statistics
 - GET /metrics: Performance metrics
 """
 
@@ -13,9 +13,9 @@ from fastapi import APIRouter, Depends
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.models.responses import SystemHealth, SystemMetrics
 from app.db.mongo import db_client
+from app.db.fsm_repository import FSMTriageRepository
 from app.engine.ml_model import predictor
 from app.engine.circuit import circuit_breaker
-from app.engine.zudu_integration import zudu_client
 from app.utils.dependencies import get_database
 from app.config import settings
 
@@ -28,10 +28,16 @@ async def get_system_health(
     database: AsyncIOMotorDatabase = Depends(get_database)
 ):
     """
-    Get system health status.
+    Get system health status with FSM statistics.
+    
+    Perfect endpoint for Build2Break judge demonstrations showing:
+    - FSM execution statistics
+    - Honeypot trigger counts
+    - HITL queue status
+    - Circuit breaker state
     
     Returns:
-        Health check status for all components
+        Health check status for all components + FSM metrics
     """
     # Check database connection
     db_connected = db_client.is_connected
@@ -42,9 +48,9 @@ async def get_system_health(
     # Get circuit breaker state
     cb_status = circuit_breaker.get_status()
     
-    # Check Zudu AI (simple check)
-    zudu_available = bool(settings.ZUDU_API_KEY and 
-                          settings.ZUDU_API_KEY != "your_zudu_api_key_here")
+    # Get FSM statistics
+    fsm_repo = FSMTriageRepository(database)
+    fsm_stats = await fsm_repo.get_fsm_statistics()
     
     # Determine overall status
     if db_connected and ml_loaded:
@@ -54,14 +60,15 @@ async def get_system_health(
     else:
         overall_status = "unhealthy"
     
-    return SystemHealth(
-        status=overall_status,
-        database_connected=db_connected,
-        ml_model_loaded=ml_loaded,
-        circuit_breaker_state=cb_status["state"],
-        zudu_ai_available=zudu_available,
-        timestamp=datetime.utcnow()
-    )
+    return {
+        "status": overall_status,
+        "database_connected": db_connected,
+        "ml_model_loaded": ml_loaded,
+        "circuit_breaker_state": cb_status["state"],
+        "timestamp": datetime.utcnow(),
+        # FSM statistics for Build2Break judging
+        "fsm_statistics": fsm_stats
+    }
 
 
 @router.get("/metrics", response_model=SystemMetrics)

@@ -5,7 +5,7 @@ Multi-page Streamlit application with role-based navigation
 
 import streamlit as st
 from utils.state_manager import initialize_session_state, clear_session_state
-from views import login, asha_panel, doctor_panel, about, contact
+from views import login, asha_panel, doctor_panel, about, contact, hitl_queue
 
 # Configure page
 st.set_page_config(
@@ -21,7 +21,6 @@ initialize_session_state()
 def show_sidebar():
     """Display sidebar with navigation and logout"""
     with st.sidebar:
-        st.image("https://via.placeholder.com/150x150.png?text=MomWatch+AI", width=150)
         st.title("🤰 MomWatch AI")
         st.markdown("---")
         
@@ -42,7 +41,7 @@ def show_sidebar():
             else:  # doctor role
                 page = st.radio(
                     "Go to",
-                    ["Doctor Dashboard", "About", "Contact"],
+                    ["Doctor Dashboard", "HITL Queue", "About", "Contact"],
                     label_visibility="collapsed"
                 )
             
@@ -77,6 +76,8 @@ def main():
         elif st.session_state.user_role == "doctor":
             if selected_page == "Doctor Dashboard":
                 doctor_panel.show()
+            elif selected_page == "HITL Queue":
+                hitl_queue.show()
             elif selected_page == "About":
                 about.show()
             elif selected_page == "Contact":

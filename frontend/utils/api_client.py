@@ -34,7 +34,8 @@ class BackendAPIClient:
     
     def __init__(self, base_url: str = API_BASE_URL):
         self.base_url = base_url
-        self.timeout = 10
+        self.timeout = 30  # Increased timeout for slow network
+        self.session = requests.Session()  # Reuse connection pool
     
     def _get_headers(self, token: Optional[str] = None) -> Dict:
         """Build request headers with optional JWT token"""
@@ -54,21 +55,26 @@ class BackendAPIClient:
             **kwargs
         }
         
-        response = requests.post(
-            f"{self.base_url}/auth/register",
-            json=payload,
-            headers=self._get_headers(),
-            timeout=self.timeout
-        )
-        
-        if response.status_code == 422:
-            error_detail = response.json().get('detail', 'Validation error')
-            raise ValueError(f"Invalid input: {error_detail}")
-        elif response.status_code == 400:
-            raise ValueError(response.json().get('detail', 'Registration failed'))
-        
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = self.session.post(
+                f"{self.base_url}/auth/register",
+                json=payload,
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 422:
+                error_detail = response.json().get('detail', 'Validation error')
+                raise ValueError(f"Invalid input: {error_detail}")
+            elif response.status_code == 400:
+                raise ValueError(response.json().get('detail', 'Registration failed'))
+            
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.ChunkedEncodingError as e:
+            raise ConnectionError(f"Connection interrupted: {str(e)}")
+        except requests.exceptions.ConnectionError as e:
+            raise ConnectionError(f"Cannot connect to backend: {str(e)}")
     
     @retry_on_failure(max_attempts=3)
     def login(self, email: str, password: str) -> Dict:
@@ -78,19 +84,24 @@ class BackendAPIClient:
             "password": password
         }
         
-        response = requests.post(
-            f"{self.base_url}/auth/login",
-            data=payload,  # Form data for OAuth2
-            timeout=self.timeout
-        )
-        
-        if response.status_code == 401:
-            raise ValueError("Invalid email or password")
-        elif response.status_code == 422:
-            raise ValueError("Invalid credentials format")
-        
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = self.session.post(
+                f"{self.base_url}/auth/login",
+                data=payload,  # Form data for OAuth2
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 401:
+                raise ValueError("Invalid email or password")
+            elif response.status_code == 422:
+                raise ValueError("Invalid credentials format")
+            
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.ChunkedEncodingError as e:
+            raise ConnectionError(f"Connection interrupted: {str(e)}")
+        except requests.exceptions.ConnectionError as e:
+            raise ConnectionError(f"Cannot connect to backend: {str(e)}")
     
     @retry_on_failure(max_attempts=3)
     def submit_triage(self, vitals: Dict, token: str, idempotency_key: str) -> Dict:
@@ -106,7 +117,7 @@ class BackendAPIClient:
             "vitals": vitals
         }
         
-        response = requests.post(
+        response = self.session.post(
             f"{self.base_url}/triage",
             json=payload,
             headers=headers,
@@ -126,7 +137,7 @@ class BackendAPIClient:
     @retry_on_failure(max_attempts=3)
     def get_emergency_feed(self, token: str) -> List[Dict]:
         """Fetch CRITICAL patients (doctor only)"""
-        response = requests.get(
+        response = self.session.get(
             f"{self.base_url}/doctor/dashboard/emergency",
             headers=self._get_headers(token),
             timeout=self.timeout
@@ -141,7 +152,7 @@ class BackendAPIClient:
     @retry_on_failure(max_attempts=3)
     def get_priority_patients(self, token: str) -> List[Dict]:
         """Fetch priority-sorted patient list (doctor only)"""
-        response = requests.get(
+        response = self.session.get(
             f"{self.base_url}/doctor/patients/priority",
             headers=self._get_headers(token),
             timeout=self.timeout
@@ -153,7 +164,7 @@ class BackendAPIClient:
     @retry_on_failure(max_attempts=3)
     def get_patient_details(self, patient_id: str, token: str) -> Dict:
         """Fetch detailed patient history (doctor only)"""
-        response = requests.get(
+        response = self.session.get(
             f"{self.base_url}/doctor/patients/{patient_id}/details",
             headers=self._get_headers(token),
             timeout=self.timeout
@@ -165,7 +176,7 @@ class BackendAPIClient:
     @retry_on_failure(max_attempts=3)
     def get_profile(self, token: str) -> Dict:
         """Fetch ASHA worker's profile"""
-        response = requests.get(
+        response = self.session.get(
             f"{self.base_url}/asha/profile",
             headers=self._get_headers(token),
             timeout=self.timeout
@@ -177,7 +188,7 @@ class BackendAPIClient:
     @retry_on_failure(max_attempts=3)
     def update_profile(self, profile_data: Dict, token: str) -> Dict:
         """Update ASHA worker's profile"""
-        response = requests.put(
+        response = self.session.put(
             f"{self.base_url}/asha/profile",
             json=profile_data,
             headers=self._get_headers(token),
@@ -190,7 +201,7 @@ class BackendAPIClient:
     @retry_on_failure(max_attempts=3)
     def get_history(self, token: str) -> List[Dict]:
         """Fetch ASHA worker's triage history"""
-        response = requests.get(
+        response = self.session.get(
             f"{self.base_url}/asha/history",
             headers=self._get_headers(token),
             timeout=self.timeout
@@ -202,7 +213,7 @@ class BackendAPIClient:
     @retry_on_failure(max_attempts=3)
     def get_health_passport(self, token: str) -> Dict:
         """Generate health passport report"""
-        response = requests.get(
+        response = self.session.get(
             f"{self.base_url}/asha/health-passport",
             headers=self._get_headers(token),
             timeout=self.timeout
@@ -214,11 +225,53 @@ class BackendAPIClient:
     @retry_on_failure(max_attempts=2)
     def get_system_health(self, token: str) -> Dict:
         """Get system health status (admin)"""
-        response = requests.get(
+        response = self.session.get(
             f"{self.base_url}/admin/system/health",
             headers=self._get_headers(token),
             timeout=5
         )
+        
+        response.raise_for_status()
+        return response.json()
+    
+    @retry_on_failure(max_attempts=3)
+    def get_hitl_queue(self, token: str) -> List[Dict]:
+        """Fetch HITL queue with pending cases (doctor only)"""
+        response = self.session.get(
+            f"{self.base_url}/doctor/hitl-queue",
+            headers=self._get_headers(token),
+            timeout=self.timeout
+        )
+        
+        if response.status_code == 403:
+            raise PermissionError("Doctor access required")
+        
+        response.raise_for_status()
+        return response.json()
+    
+    @retry_on_failure(max_attempts=3)
+    def resolve_hitl(self, decision_id: str, final_risk_level: str, doctor_notes: str, version_id: int, token: str) -> Dict:
+        """Resolve HITL case with doctor's decision (doctor only)"""
+        payload = {
+            "decision_id": decision_id,
+            "final_risk_level": final_risk_level,
+            "doctor_notes": doctor_notes,
+            "version_id": version_id
+        }
+        
+        response = self.session.post(
+            f"{self.base_url}/doctor/hitl-resolve",
+            json=payload,
+            headers=self._get_headers(token),
+            timeout=self.timeout
+        )
+        
+        if response.status_code == 403:
+            raise PermissionError("Doctor access required")
+        elif response.status_code == 409:
+            raise ValueError("Version conflict: Case already reviewed by another doctor")
+        elif response.status_code == 404:
+            raise ValueError("HITL case not found")
         
         response.raise_for_status()
         return response.json()

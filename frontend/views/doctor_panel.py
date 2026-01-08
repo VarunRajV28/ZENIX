@@ -665,18 +665,11 @@ def show_profile_tab():
     """Display doctor profile information"""
     st.markdown("## 👤 Doctor Profile")
     
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        st.markdown("### 📸 Profile Picture")
-        st.image("https://via.placeholder.com/200x200.png?text=Doctor", width=200)
-    
-    with col2:
-        st.markdown("### 👨‍⚕️ Personal Information")
-        st.text_input("Full Name", value=st.session_state.user_email.split('@')[0].title(), disabled=True)
-        st.text_input("Email", value=st.session_state.user_email, disabled=True)
-        st.text_input("Role", value="Doctor", disabled=True)
-        st.text_input("Specialization", value="Maternal Health Specialist", disabled=True)
+    st.markdown("### 👨‍⚕️ Personal Information")
+    st.text_input("Full Name", value=st.session_state.user_email.split('@')[0].title(), disabled=True)
+    st.text_input("Email", value=st.session_state.user_email, disabled=True)
+    st.text_input("Role", value="Doctor", disabled=True)
+    st.text_input("Specialization", value="Maternal Health Specialist", disabled=True)
     
     st.markdown("---")
     
@@ -729,7 +722,7 @@ def show_about_tab():
     1. **Layer 0**: Sanity validation (adversarial defense)
     2. **Layer 1**: Clinical rules engine (evidence-based protocols)
     3. **Layer 2**: Machine Learning model (RandomForest, 99.6% accuracy)
-    4. **Layer 3**: AI insights (Zudu integration - optional)
+    4. **Layer 3**: Comprehensive assessment aggregation
     
     ### 📊 System Performance
     - **Model Accuracy**: 99.6%

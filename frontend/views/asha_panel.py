@@ -14,7 +14,7 @@ def show():
     """Display ASHA worker dashboard"""
     
     st.title("🏥 ASHA Worker Dashboard")
-    st.markdown(f"Welcome, **{st.session_state.user_email}**")
+    st.markdown(f"Welcome, **`{st.session_state.user_email}`**")
     st.markdown("---")
     
     # Dashboard statistics

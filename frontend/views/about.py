@@ -33,12 +33,7 @@ def show():
     - Clinical notes explain medical reasoning in human-readable language
     - Confidence scores provide transparency in predictions
     
-    #### 4. **Zudu AI Integration**
-    - Advanced NLP-powered maternal health insights
-    - Clinical decision support recommendations
-    - Risk factor explanations in natural language
-    
-    #### 5. **Real-time Emergency Alerting**
+    #### 4. **Real-time Emergency Alerting**
     - Automatic CRITICAL patient flagging for healthcare providers
     - Priority scoring algorithm for efficient triage
     - 30-second auto-refresh for emergency feed
@@ -56,8 +51,7 @@ def show():
                     ↓                               ↓
                     └───────────────┬───────────────┘
                                     ↓
-                              Zudu AI Enhancement
-                                    ↓
+
                             Final Risk Assessment
     ```
     
@@ -94,7 +88,6 @@ def show():
     - **Frontend:** Streamlit, Plotly
     - **Database:** MongoDB 6.0+
     - **ML:** Scikit-learn, Joblib
-    - **AI Enhancement:** Zudu AI API
     - **Deployment:** Docker, Docker Compose
     
     ### 👥 User Roles
@@ -122,9 +115,6 @@ def show():
     
     **Dataset Reference:** 
     Maternal Health Risk Data Set - Kaggle
-    
-    **AI Partner:** 
-    Zudu AI - Advanced Maternal Health NLP
     """)
     
     st.markdown("---")

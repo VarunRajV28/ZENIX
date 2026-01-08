@@ -2,6 +2,8 @@
 FastAPI Main Application
 =========================
 Entry point for MomWatch AI backend with:
+- FSM Architecture (Finite State Machine)
+- Honeypot Middleware (attack detection)
 - CORS configuration
 - Global exception handlers
 - Lifespan events (startup/shutdown)
@@ -17,9 +19,10 @@ from pydantic import ValidationError
 from pymongo.errors import PyMongoError
 from app.config import settings
 from app.db.mongo import db_client
+from app.db.fsm_repository import FSMTriageRepository
+from app.middleware.honeypot import HoneypotMiddleware
 from app.engine.ml_model import predictor, MLModelException
 from app.engine.circuit import CircuitBreakerOpen
-from app.engine.zudu_integration import zudu_client, ZuduAPIException
 from app.utils.logger import logger
 from app.api import auth, triage, doctor, asha, admin
 
@@ -40,6 +43,12 @@ async def lifespan(app: FastAPI):
     try:
         await db_client.connect()
         logger.info("✓ Database connected")
+        
+        # Initialize FSM repository indexes
+        fsm_repo = FSMTriageRepository(db_client.get_database())
+        await fsm_repo.create_indexes()
+        logger.info("✓ FSM indexes created")
+        
     except Exception as e:
         logger.critical(f"✗ Database connection failed: {str(e)}")
         raise
@@ -52,17 +61,18 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠ ML model not loaded: {str(e)}")
         logger.warning("System will operate in fallback mode (clinical rules only)")
     
-    # Initialize Zudu AI client
-    if settings.ZUDU_API_KEY and settings.ZUDU_API_KEY != "your_zudu_api_key_here":
-        logger.info("✓ Zudu AI configured")
-    else:
-        logger.warning("⚠ Zudu AI not configured (optional)")
+    # Log FSM configuration
+    logger.info(f"✓ FSM: Honeypot={'enabled' if settings.HONEYPOT_ENABLED else 'disabled'}")
+    logger.info(f"✓ FSM: HITL threshold={settings.HITL_CONFIDENCE_THRESHOLD}")
     
     logger.info("=" * 70)
     logger.info("MomWatch AI Backend - Ready to serve requests")
     logger.info(f"API Host: {settings.API_HOST}:{settings.API_PORT}")
     logger.info(f"CORS Origins: {settings.CORS_ORIGINS}")
     logger.info("=" * 70)
+    
+    # Store database in app state for middleware access
+    app.state.database = db_client.get_database()
     
     yield
     
@@ -75,10 +85,6 @@ async def lifespan(app: FastAPI):
     await db_client.close()
     logger.info("✓ Database connection closed")
     
-    # Close Zudu AI session
-    await zudu_client.close()
-    logger.info("✓ Zudu AI client closed")
-    
     logger.info("MomWatch AI Backend - Shutdown complete")
 
 
@@ -87,12 +93,32 @@ async def lifespan(app: FastAPI):
 # =============================================================================
 app = FastAPI(
     title="MomWatch AI",
-    description="Production-grade maternal health monitoring system with ML risk assessment",
+    description=(
+        "Production-grade maternal health monitoring system with ML risk assessment\\n\\n"
+        "**Build2Break Edition:**\\n"
+        "- Finite State Machine architecture for deterministic processing\\n"
+        "- Honeypot detection for automated attack tools\\n"
+        "- Human-in-the-Loop (HITL) integration for low-confidence cases\\n"
+        "- Complete FSM trace for debugging and audit\\n\\n"
+        "**⚠️ Security Notice:** This system includes honeypot fields. "
+        "Unauthorized scanning or testing may be logged."
+    ),
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
 )
+
+# =============================================================================
+# Honeypot Middleware (Layer 0 Defense)
+# =============================================================================
+if settings.HONEYPOT_ENABLED:
+    app.add_middleware(
+        HoneypotMiddleware,
+        enabled=settings.HONEYPOT_ENABLED,
+        log_to_db=settings.HONEYPOT_LOG_TO_DB
+    )
+    logger.info("✓ Honeypot middleware registered")
 
 # =============================================================================
 # CORS Middleware
@@ -205,26 +231,6 @@ async def ml_model_exception_handler(request: Request, exc: MLModelException):
         content={
             "error_type": "ML_MODEL_ERROR",
             "detail": "ML model temporarily unavailable. Using fallback assessment."
-        }
-    )
-
-
-@app.exception_handler(ZuduAPIException)
-async def zudu_exception_handler(request: Request, exc: ZuduAPIException):
-    """
-    Handle Zudu AI API errors (non-critical).
-    """
-    logger.warning(
-        f"Zudu AI error: {str(exc)}",
-        extra={"path": request.url.path}
-    )
-    
-    # Zudu AI is optional, so we don't fail the request
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={
-            "message": "Zudu AI unavailable, continuing with standard assessment.",
-            "zudu_available": False
         }
     )
 

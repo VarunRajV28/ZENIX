@@ -31,29 +31,18 @@ from app.engine.sanity import ClinicalVitals
 from app.engine.rules import ClinicalRulesEngine, RiskLevel
 from app.engine.ml_model import predictor, MLModelException
 from app.engine.circuit import circuit_breaker, CircuitBreakerOpen
-from app.engine.zudu_integration import zudu_client
 from app.utils.logger import logger
 
 
 async def assess_maternal_risk(vitals: ClinicalVitals) -> Dict[str, Any]:
     """
-    Comprehensive maternal risk assessment through 3-layer pipeline.
+    Comprehensive maternal risk assessment through 2-layer pipeline.
     
     Args:
         vitals: Validated clinical vitals
     
     Returns:
-        Dictionary containing:
-        - risk_level: Final RiskLevel
-        - confidence: Prediction confidence
-        - alerts: List of clinical alerts
-        - clinical_notes: Human-readable explanations
-        - feature_importances: ML feature importances (if available)
-        - engine_source: "CLINICAL_RULES", "ML_MODEL", or "HYBRID"
-        - fallback_active: True if ML model bypassed
-        - zudu_insights: AI-enhanced insights (if available)
-        - timestamp: Assessment timestamp
-        - processing_time_ms: Processing duration
+        Complete assessment with risk level, alerts, notes, and metadata
     """
     start_time = time.time()
     
@@ -83,9 +72,6 @@ async def assess_maternal_risk(vitals: ClinicalVitals) -> Dict[str, Any]:
             "CRITICAL CONDITION DETECTED: ML model bypassed by clinical rules"
         )
         
-        # Try to get Zudu insights (non-blocking, best effort)
-        zudu_insights = await _get_zudu_insights_safe(vitals, rules_result)
-        
         processing_time_ms = int((time.time() - start_time) * 1000)
         
         return {
@@ -96,7 +82,6 @@ async def assess_maternal_risk(vitals: ClinicalVitals) -> Dict[str, Any]:
             "feature_importances": {},
             "engine_source": "CLINICAL_RULES",
             "fallback_active": False,  # Not a fallback, intentional bypass
-            "zudu_insights": zudu_insights,
             "timestamp": datetime.utcnow(),
             "processing_time_ms": processing_time_ms
         }
@@ -142,11 +127,6 @@ async def assess_maternal_risk(vitals: ClinicalVitals) -> Dict[str, Any]:
         engine_source = "CLINICAL_RULES"
     
     # =========================================================================
-    # LAYER 3: Zudu AI Enhancement (Non-Blocking)
-    # =========================================================================
-    zudu_insights = await _get_zudu_insights_safe(vitals, final_result)
-    
-    # =========================================================================
     # FINAL RESPONSE
     # =========================================================================
     processing_time_ms = int((time.time() - start_time) * 1000)
@@ -164,7 +144,6 @@ async def assess_maternal_risk(vitals: ClinicalVitals) -> Dict[str, Any]:
         "feature_importances": final_result.get("feature_importances", {}),
         "engine_source": engine_source,
         "fallback_active": fallback_active,
-        "zudu_insights": zudu_insights,
         "timestamp": datetime.utcnow(),
         "processing_time_ms": processing_time_ms
     }
@@ -246,36 +225,3 @@ def _merge_ml_and_rules(
         "clinical_notes": combined_notes,
         "feature_importances": ml_result.get("feature_importances", {})
     }
-
-
-async def _get_zudu_insights_safe(
-    vitals: ClinicalVitals,
-    assessment: Dict[str, Any],
-    timeout: int = 3
-) -> Dict[str, Any]:
-    """
-    Get Zudu AI insights with timeout protection.
-    
-    Args:
-        vitals: Clinical vitals
-        assessment: Current assessment
-        timeout: Timeout in seconds
-    
-    Returns:
-        Zudu insights or None
-    """
-    try:
-        # Run with timeout to prevent blocking
-        zudu_insights = await asyncio.wait_for(
-            zudu_client.analyze_clinical_context(vitals, assessment),
-            timeout=timeout
-        )
-        return zudu_insights
-    
-    except asyncio.TimeoutError:
-        logger.warning(f"Zudu AI timeout after {timeout}s")
-        return None
-    
-    except Exception as e:
-        logger.warning(f"Zudu AI error: {str(e)}")
-        return None
