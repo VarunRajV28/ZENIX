@@ -1,6 +1,33 @@
 # MomWatch AI - Maternal Health Monitoring System
 
-![MomWatch AI](https://via.placeholder.com/800x200.png?text=MomWatch+AI+-+Rural+Maternal+Health+Platform)
+# PROBLEM STATEMENT
+
+## Title
+**"Real-Time Clinical Decision Support Gap for Community Health Workers in Maternal Care"**
+
+## The Problem
+In rural and semi-urban India, **900,000+ ASHA** (Accredited Social Health Activist) workers serve as the primary healthcare interface for over **26 million pregnancies** annually. These frontline workers face critical challenges:
+
+* **Knowledge Gap:** 78% of ASHA workers lack formal medical training, relying on basic checklists that don't adapt to complex clinical scenarios.
+* **Delayed Risk Recognition:** 45% of maternal deaths occur due to delayed identification of complications like preeclampsia, gestational diabetes, and hemorrhage risk. By the time symptoms become obvious, critical intervention windows have passed.
+* **Infrastructure Constraints:**
+    * 60% of rural health centers lack consistent internet connectivity.
+    * Paper-based tracking systems create data fragmentation.
+    * No standardized triage protocol across different PHCs (Primary Health Centers).
+* **Communication Barriers:**
+    * Doctors receive incomplete or misinterpreted patient histories.
+* **Resource Allocation:** District hospitals don't know which patients need urgent attention until they physically arrive, leading to:
+    * Ambulance misallocation.
+    * Emergency room overcrowding with non-urgent cases.
+    * Critical cases waiting in queue behind stable patients.
+
+## Real-World Impact
+*Current Statistics (WHO India, 2023):*
+
+* **Maternal Mortality Ratio:** 97 deaths per 100,000 live births.
+* **67%** of these deaths are preventable with timely triage.
+* **Average delay** from symptom onset to treatment: 4.2 hours.
+* **Only 32%** of high-risk pregnancies are identified before complications.
 
 ## 🏥 Overview
 
