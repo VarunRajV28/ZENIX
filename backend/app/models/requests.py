@@ -29,6 +29,9 @@ class RegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=100)
     role: str = Field(..., pattern="^(asha|doctor)$")
     
+    # Security: Invite code required for doctor role
+    invite_code: Optional[str] = Field(None, description="Required for doctor role registration")
+    
     # Optional fields
     age: Optional[int] = Field(None, ge=15, le=100)
     phone: Optional[str] = None

@@ -70,6 +70,50 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO")
     LOG_FILE_PATH: str = Field(default="/app/logs/momwatch.log")
     
+    @field_validator("JWT_SECRET")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        """
+        Validate JWT secret strength.
+        
+        Security requirements:
+        - Minimum 32 characters (enforced by Field)
+        - Cannot be common/weak patterns
+        - Must not contain only alphanumeric characters (requires special chars)
+        """
+        # Check for common weak patterns
+        weak_patterns = [
+            "your-secret-key",
+            "change-me",
+            "example",
+            "test",
+            "secret",
+            "password",
+            "default"
+        ]
+        
+        v_lower = v.lower()
+        for pattern in weak_patterns:
+            if pattern in v_lower:
+                raise ValueError(
+                    f"JWT_SECRET contains weak pattern '{pattern}'. "
+                    "Generate a strong secret using: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                )
+        
+        # Check entropy - must contain variety of characters
+        has_upper = any(c.isupper() for c in v)
+        has_lower = any(c.islower() for c in v)
+        has_digit = any(c.isdigit() for c in v)
+        has_special = any(not c.isalnum() for c in v)
+        
+        if not (has_upper and has_lower and has_digit):
+            raise ValueError(
+                "JWT_SECRET must contain uppercase, lowercase, and numeric characters. "
+                "Generate a strong secret using: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+        
+        return v
+    
     @field_validator("MONGO_URI")
     @classmethod
     def validate_mongo_uri(cls, v: str) -> str:

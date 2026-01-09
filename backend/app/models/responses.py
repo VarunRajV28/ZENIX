@@ -182,7 +182,7 @@ class SystemHealth(BaseModel):
     database_connected: bool
     ml_model_loaded: bool
     circuit_breaker_state: str
-
+    fsm_statistics: Dict[str, Any]
     timestamp: datetime
     
     class Config:
@@ -192,7 +192,11 @@ class SystemHealth(BaseModel):
                 "database_connected": True,
                 "ml_model_loaded": True,
                 "circuit_breaker_state": "CLOSED",
-                "zudu_ai_available": True,
+                "fsm_statistics": {
+                    "total_decisions": 150,
+                    "honeypot_triggers": 3,
+                    "hitl_cases": {"pending": 5, "resolved": 12}
+                },
                 "timestamp": "2026-01-08T10:30:00"
             }
         }

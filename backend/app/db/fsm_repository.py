@@ -225,16 +225,13 @@ class FSMTriageRepository:
         Returns:
             Statistics dict with counts, averages, and distributions
         """
+        # Query triage decisions collection for FSM statistics
         pipeline = [
             {
                 "$facet": {
                     "total_decisions": [{"$count": "count"}],
                     "state_distribution": [
                         {"$group": {"_id": "$fsm_state", "count": {"$sum": 1}}}
-                    ],
-                    "honeypot_triggers": [
-                        {"$match": {"is_honeypot_triggered": True}},
-                        {"$count": "count"}
                     ],
                     "hitl_cases": [
                         {"$match": {"requires_hitl": True}},
@@ -256,11 +253,14 @@ class FSMTriageRepository:
         cursor = self.collection.aggregate(pipeline)
         results = await cursor.to_list(length=1)
         
+        # Get honeypot trigger count from the correct collection (honeypot_alerts)
+        honeypot_count = await self.honeypot_collection.count_documents({})
+        
         if not results:
             return {
                 "total_decisions": 0,
                 "state_distribution": {},
-                "honeypot_triggers": 0,
+                "honeypot_triggers": honeypot_count,
                 "hitl_pending": 0,
                 "avg_processing_time_ms": 0
             }
@@ -273,7 +273,7 @@ class FSMTriageRepository:
                 item["_id"]: item["count"] 
                 for item in stats.get("state_distribution", [])
             },
-            "honeypot_triggers": stats["honeypot_triggers"][0]["count"] if stats["honeypot_triggers"] else 0,
+            "honeypot_triggers": honeypot_count,
             "hitl_cases": {
                 item["_id"]: item["count"]
                 for item in stats.get("hitl_cases", [])

@@ -96,16 +96,26 @@ def show():
                 format_func=lambda x: "👶 ASHA Worker" if x == "asha" else "👨‍⚕️ Doctor"
             )
             
-            # Additional role-specific fields
-            if reg_role == "asha":
-                reg_age = st.number_input("Age", min_value=15, max_value=60, value=28)
-                reg_working_weeks = st.number_input("Working Weeks", min_value=0, max_value=42, value=20)
+            # Always show invite code field - required only for doctors
+            st.caption("🔒 Note: Doctor registration requires an invite code from administrator")
+            reg_invite_code = st.text_input(
+                "Invite Code (Required for Doctors)",
+                type="password",
+                help="Leave blank if registering as ASHA worker. Doctors must contact administrator for invite code.",
+                key="reg_invite_code"
+            )
+            
+            # ASHA-specific fields
+            reg_age = st.number_input("Age (ASHA only)", min_value=15, max_value=60, value=28, help="Required only for ASHA workers")
+            reg_working_weeks = st.number_input("Working Weeks (ASHA only)", min_value=0, max_value=42, value=20, help="Required only for ASHA workers")
             
             submit_register = st.form_submit_button("Register", use_container_width=True)
             
             if submit_register:
                 if not all([reg_full_name, reg_email, reg_password, reg_password_confirm]):
                     st.error("Please fill in all fields")
+                elif reg_role == "doctor" and not reg_invite_code:
+                    st.error("🔒 Invite code is required for doctor registration")
                 elif len(reg_full_name.strip()) < 3:
                     st.error("Full name must be at least 3 characters long")
                 elif not validate_email(reg_email):
@@ -126,6 +136,12 @@ def show():
                                     "role": reg_role
                                 }
                                 
+                                # Add invite code for doctor role
+                                if reg_role == "doctor":
+                                    if reg_invite_code:
+                                        payload["invite_code"] = reg_invite_code
+                                
+                                # Add ASHA-specific fields
                                 if reg_role == "asha":
                                     payload["age"] = reg_age
                                     payload["working_weeks"] = reg_working_weeks

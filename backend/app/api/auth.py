@@ -60,6 +60,49 @@ async def register(
             detail="Email already registered"
         )
     
+    # SL-1 Security Fix: Validate invite code for doctor role registration
+    if request.role == "doctor":
+        if not request.invite_code:
+            log_security_event("registration_failed", request.email, {"reason": "missing_invite_code", "role": "doctor"})
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Doctor registration requires a valid invite code"
+            )
+        
+        # Verify invite code exists and is valid
+        invite_collection = database.invite_codes
+        invite_doc = await invite_collection.find_one({"code": request.invite_code})
+        
+        if not invite_doc:
+            log_security_event("registration_failed", request.email, {"reason": "invalid_invite_code"})
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid invite code"
+            )
+        
+        if invite_doc.get("is_used", False):
+            log_security_event("registration_failed", request.email, {"reason": "invite_code_reused"})
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invite code has already been used"
+            )
+        
+        # Check if invite code has expired
+        if "expires_at" in invite_doc:
+            from datetime import datetime, timezone
+            expires_at = invite_doc["expires_at"]
+            # Ensure timezone-aware comparison
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > expires_at:
+                log_security_event("registration_failed", request.email, {"reason": "invite_code_expired"})
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Invite code has expired"
+                )
+        
+        logger.info(f"Invite code validated for doctor registration: {request.invite_code}")
+    
     # Create user document
     user_data = UserDocument(
         email=request.email,
@@ -77,7 +120,17 @@ async def register(
     # Save to database
     user_id = await user_repo.create_user(user_data)
     
+    # Mark invite code as used (for doctor role)
+    if request.role == "doctor" and request.invite_code:
+        invite_collection = database.invite_codes
+        await invite_collection.update_one(
+            {"code": request.invite_code},
+            {"$set": {"is_used": True, "used_by": user_id, "used_at": user_data.created_at}}
+        )
+        logger.info(f"Invite code {request.invite_code} marked as used")
+    
     logger.info(f"New user registered: {request.email} (role: {request.role})")
+    log_security_event("registration_success", request.email, {"role": request.role, "user_id": user_id})
     
     # Generate JWT token
     access_token = create_access_token(
